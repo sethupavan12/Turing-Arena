@@ -4,7 +4,7 @@ from flask_sqlalchemy import SQLAlchemy
 import random
 import os
 
-app = Flask(__name__)
+app = Flask(__name__, static_folder='static', static_url_path='')
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'nokeyset')
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
 db = SQLAlchemy(app)
@@ -26,7 +26,7 @@ llm_responses = [
 
 @app.route('/')
 def index():
-    return "Chat App Backend"
+    return send_from_directory(app.static_folder, 'index.html')
 
 @app.route('/submit-vote', methods=['POST'])
 def submit_vote():
