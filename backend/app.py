@@ -1,88 +1,64 @@
+# app.py
 from flask import Flask, request, jsonify
-from flask_socketio import SocketIO, send, emit
-from flask_sqlalchemy import SQLAlchemy
-import random
-import os
+from flask_cors import CORS
 
-app = Flask(__name__, static_folder='static', static_url_path='')
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'nokeyset')
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///database.db'
-db = SQLAlchemy(app)
-socketio = SocketIO(app)
+app = Flask(__name__)
+CORS(app)
 
-from models import Vote
+# Dummy data for leaderboard
+leaderboard = {
+    'Phi3': {'human_votes': 0, 'total_votes': 0},
+    '': {'human_votes': 0, 'total_votes': 0}
+}
 
-users = {}
-available_users = []
 
-# Dummy LLM responses for demonstration
-llm_responses = [
-    "Hello! How can I help you today?",
-    "I'm just a chatbot, but I'll do my best to assist you.",
-    "Can you tell me more about that?",
-    "That's interesting. Tell me more.",
-    "How can I help you further?"
-]
+# We need to basically 
+# 1. Generate a random topic to talk about, provoking a question, from an LLM or human
+# 2. Once we get a random topic question, we then  send that question to LLM if its LLM's turn (we make sure at random that user gets first changes or AI)
+# 3. If it is user's turn we wait for user's answer and then send that to LLM and relay the reply
+# 4. Once a two and fro conv Ai replies to human or human replies to AI is done, we then say end of chat.
+# 5. Ask for Vote if it is human or AI
+# 6. Send the vote to DB for safe keeping along with caching the question asked by human, question asked by AI, random topic generated
+# 7. Next time another user comes in, the random topic is randomly returned from the cache along with AI question or human
 
-@app.route('/')
-def index():
-    return send_from_directory(app.static_folder, 'index.html')
+@app.route('/get_topic', methods=['GET'])
+def get_topic():
+    topic = "Discuss the implications of AI in modern society."
+    return jsonify({'topic': topic})
 
-@app.route('/submit-vote', methods=['POST'])
+@app.route('/get_response', methods=['POST'])
+def get_response():
+    data = request.json
+    message = data.get('message')
+    responder = data.get('responder')  # 'AI_1', 'AI_2' or 'human'
+
+    # Simulate response
+    if responder == 'AI_1':
+        response = "AI_1's response to: " + message
+    elif responder == 'AI_2':
+        response = "AI_2's response to: " + message
+    else:
+        response = "Human's response to: " + message
+
+    return jsonify({'response': response})
+
+@app.route('/submit_vote', methods=['POST'])
 def submit_vote():
     data = request.json
-    vote = Vote(session_id=data['session_id'], is_human=data['is_human'])
-    db.session.add(vote)
-    db.session.commit()
-    return jsonify({"message": "Vote submitted successfully"}), 201
+    responder = data.get('responder')
+    vote = data.get('vote')  # 'human' or 'ai'
+
+    if responder in leaderboard:
+        leaderboard[responder]['total_votes'] += 1
+        if vote == 'human':
+            leaderboard[responder]['human_votes'] += 1
+
+    return jsonify({'status': 'success'})
 
 @app.route('/leaderboard', methods=['GET'])
-def leaderboard():
-    results = db.session.query(Vote.is_human, db.func.count(Vote.id)).group_by(Vote.is_human).all()
-    leaderboard_data = [{"is_human": result[0], "count": result[1]} for result in results]
-    return jsonify({"leaderboard": leaderboard_data})
-
-@socketio.on('connect')
-def handle_connect():
-    users[request.sid] = None
-    available_users.append(request.sid)
-    print(f'User {request.sid} connected.')
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    if request.sid in users:
-        partner_sid = users[request.sid]
-        if partner_sid in users:
-            users[partner_sid] = None
-            available_users.append(partner_sid)
-        del users[request.sid]
-    if request.sid in available_users:
-        available_users.remove(request.sid)
-    print(f'User {request.sid} disconnected.')
-
-@socketio.on('message')
-def handle_message(message):
-    sid = request.sid
-    if users[sid] is None:
-        if available_users and len(available_users) > 1:
-            partner_sid = available_users.pop(0)
-            if partner_sid != sid:
-                users[sid] = partner_sid
-                users[partner_sid] = sid
-                send({"user": "System", "text": "You are now connected to another user."}, to=sid)
-                send({"user": "System", "text": "You are now connected to another user."}, to=partner_sid)
-            else:
-                available_users.append(sid)
-        else:
-            send({"user": "System", "text": "You are now chatting with an AI."}, to=sid)
-            users[sid] = 'AI'
-    if users[sid] == 'AI':
-        response = random.choice(llm_responses)
-        send({"user": "AI", "text": response}, to=sid)
-    else:
-        partner_sid = users[sid]
-        send({"user": "User", "text": message}, to=partner_sid)
+def get_leaderboard():
+    human_likeness = {key: (value['human_votes'] / value['total_votes']) * 100 if value['total_votes'] > 0 else 0 for key, value in leaderboard.items()}
+    return jsonify(human_likeness)
 
 if __name__ == '__main__':
-    db.create_all()
-    socketio.run(app, debug=True)
+    app.run(host='0.0.0.0', port=5000)
