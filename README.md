@@ -1,6 +1,8 @@
 # Turing Arena
 
-A fun version of LMSYS specifically for SLMs
+A fun version of LMSYS specifically for SLMs.
+
+Barebones stage at the moment.
 
 
-Going live soon! Star and Follow the project!
+Going live soon! So, Star and Follow the project!
