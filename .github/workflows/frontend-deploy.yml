@@ -26,8 +26,16 @@ jobs:
         run: npm run build
         working-directory: ./turing-arena-frontend
 
+      - name: Configure git
+        run: |
+          git config --global user.email "sethupavan12"
+          git config --global user.name "Sethu"
+        working-directory: ./turing-arena-frontend
+
       - name: Deploy to GitHub Pages
-        run: npm run deploy
+        run: |
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+          npm run deploy
         working-directory: ./turing-arena-frontend
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
