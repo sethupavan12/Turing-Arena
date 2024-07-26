@@ -1,16 +1,19 @@
 # app.py
-from flask import Flask, request, jsonify
+import os
+import requests
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
-
+import random
 app = Flask(__name__)
 CORS(app)
 
 # Dummy data for leaderboard
 leaderboard = {
     'Phi3': {'human_votes': 0, 'total_votes': 0},
-    '': {'human_votes': 0, 'total_votes': 0}
+    'Llama3.1': {'human_votes': 0, 'total_votes': 0}
 }
 
+topics = ["AGI", "Human Beings", "Memes"]
 
 # We need to basically 
 # 1. Generate a random topic to talk about, provoking a question, from an LLM or human
@@ -21,10 +24,38 @@ leaderboard = {
 # 6. Send the vote to DB for safe keeping along with caching the question asked by human, question asked by AI, random topic generated
 # 7. Next time another user comes in, the random topic is randomly returned from the cache along with AI question or human
 
-@app.route('/get_topic', methods=['GET'])
-def get_topic():
-    topic = "Discuss the implications of AI in modern society."
-    return jsonify({'topic': topic})
+@app.route('/get_random_topic', methods=['GET'])
+def get_random_topic():
+    # Pick at random from a list of topics
+    topic = random.choice(topics)
+    discussion = "You both need to talk about {topic}"
+    return jsonify({'topic_statement': discussion})
+
+# Generate question if first responder is AI (phi3 or llama3.1)
+@app.route('/get_ai_question', methods=['POST'])
+def get_ai_question():
+    data = request.json
+    model_to_use = data.get('model')
+    topic_statement = data.get('topic_statement')
+    
+    def generate():
+        url = "http://localhost:11434/api/generate"
+        payload = {
+            "model": model_to_use,
+            "prompt": topic_statement
+        }
+        headers = {
+            'Content-Type': 'application/json'
+        }
+        response = requests.post(url, json=payload, headers=headers, stream=True)
+        
+        for chunk in response.iter_content(chunk_size=1024):
+            if chunk:
+                yield chunk.decode('utf-8')
+    
+    return Response(generate(), content_type='text/event-stream')
+
+
 
 @app.route('/get_response', methods=['POST'])
 def get_response():
