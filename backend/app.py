@@ -1,95 +1,128 @@
-# app.py
 import os
 import requests
-from flask import Flask, request, jsonify, Response
+from flask import Flask, request, Response, send_from_directory
 from flask_cors import CORS
-import random
+from azure.storage.blob import BlobServiceClient
+import json
+import hashlib
+from cache import LRUCache
+
 app = Flask(__name__)
 CORS(app)
 
-# Dummy data for leaderboard
-leaderboard = {
-    'Phi3': {'human_votes': 0, 'total_votes': 0},
-    'Llama3.1': {'human_votes': 0, 'total_votes': 0}
-}
+OLLAMA_GENERATE_URL = "http://localhost:11434/api/generate"
 
-topics = ["AGI", "Human Beings", "Memes"]
+# Azure Blob Storage configuration
+AZURE_CONNECTION_STRING = os.getenv('AZURE_CONNECTION_STRING')
+CONTAINER_NAME = 'cache'
 
-# We need to basically 
-# 1. Generate a random topic to talk about, provoking a question, from an LLM or human
-# 2. Once we get a random topic question, we then  send that question to LLM if its LLM's turn (we make sure at random that user gets first changes or AI)
-# 3. If it is user's turn we wait for user's answer and then send that to LLM and relay the reply
-# 4. Once a two and fro conv Ai replies to human or human replies to AI is done, we then say end of chat.
-# 5. Ask for Vote if it is human or AI
-# 6. Send the vote to DB for safe keeping along with caching the question asked by human, question asked by AI, random topic generated
-# 7. Next time another user comes in, the random topic is randomly returned from the cache along with AI question or human
+# Initialize LRUCache
+cache = LRUCache(capacity=10, connection_string=AZURE_CONNECTION_STRING, container_name=CONTAINER_NAME)
 
-@app.route('/get_random_topic', methods=['GET'])
-def get_random_topic():
-    # Pick at random from a list of topics
-    topic = random.choice(topics)
-    discussion = "You both need to talk about {topic}"
-    return jsonify({'topic_statement': discussion})
+def get_cache_key(user_input):
+    return hashlib.md5(user_input.encode()).hexdigest()
 
-# Generate question if first responder is AI (phi3 or llama3.1)
-@app.route('/get_ai_question', methods=['POST'])
-def get_ai_question():
+def get_from_cache(model, key):
+    # Check in-memory cache
+    cached_response = cache.get(model, key)
+    if cached_response:
+        return cached_response
+    
+    # Check Azure Blob Storage
+    try:
+        blob_client = cache.container_client.get_blob_client(f"{model}:{key}")
+        blob_data = blob_client.download_blob().readall()
+        return blob_data.decode('utf-8')
+    except Exception as e:
+        return None
+
+def save_to_cache(model, key, data):
+    # Save to in-memory cache
+    cache.put(model, key, data)
+
+# Serve static content
+@app.route('/')
+def serve_static():
+    return send_from_directory('static', 'index.html')
+
+@app.route('/static/<path:path>')
+def serve_static_files(path):
+    return send_from_directory('static', path)
+
+# Chat endpoint for LLM 1
+@app.route('/chat_llm1', methods=['POST'])
+def chat_llm1():
+    LLM1="phi3"
     data = request.json
-    model_to_use = data.get('model')
-    topic_statement = data.get('topic_statement')
+    user_input = data.get('user_input')
+    cache_key = get_cache_key(user_input)
+    
+    cached_response = get_from_cache(LLM1, cache_key)
+    if cached_response:
+        return Response(cached_response, content_type='text/event-stream')
     
     def generate():
-        url = "http://localhost:11434/api/generate"
         payload = {
-            "model": model_to_use,
-            "prompt": topic_statement
+            "model": LLM1,
+            "prompt": user_input
         }
         headers = {
             'Content-Type': 'application/json'
         }
-        response = requests.post(url, json=payload, headers=headers, stream=True)
+        response = requests.post(OLLAMA_GENERATE_URL, json=payload, headers=headers, stream=True)
         
+        response_data = ""
         for chunk in response.iter_content(chunk_size=1024):
             if chunk:
-                yield chunk.decode('utf-8')
+                chunk_data = chunk.decode('utf-8')
+                response_data += chunk_data
+                yield chunk_data
+        
+        save_to_cache(LLM1, cache_key, response_data)
     
     return Response(generate(), content_type='text/event-stream')
 
-
-
-@app.route('/get_response', methods=['POST'])
-def get_response():
+# Chat endpoint for LLM 2
+@app.route('/chat_llm2', methods=['POST'])
+def chat_llm2():
+    LLM2="llama3.1"
     data = request.json
-    message = data.get('message')
-    responder = data.get('responder')  # 'AI_1', 'AI_2' or 'human'
+    user_input = data.get('user_input')
+    cache_key = get_cache_key(user_input)
+    
+    cached_response = get_from_cache(LLM2, cache_key)
+    if cached_response:
+        return Response(cached_response, content_type='text/event-stream')
+    
+    def generate():
+        payload = {
+            "model": LLM2,
+            "prompt": user_input
+        }
+        headers = {
+            'Content-Type': 'application/json'
+        }
+        response = requests.post(OLLAMA_GENERATE_URL, json=payload, headers=headers, stream=True)
+        
+        response_data = ""
+        for chunk in response.iter_content(chunk_size=1024):
+            if chunk:
+                chunk_data = chunk.decode('utf-8')
+                response_data += chunk_data
+                yield chunk_data
+        
+        save_to_cache(LLM2, cache_key, response_data)
+    
+    return Response(generate(), content_type='text/event-stream')
 
-    # Simulate response
-    if responder == 'AI_1':
-        response = "AI_1's response to: " + message
-    elif responder == 'AI_2':
-        response = "AI_2's response to: " + message
-    else:
-        response = "Human's response to: " + message
-
-    return jsonify({'response': response})
-
-@app.route('/submit_vote', methods=['POST'])
-def submit_vote():
+# Endpoint to store votes
+@app.route('/vote', methods=['POST'])
+def vote():
     data = request.json
-    responder = data.get('responder')
-    vote = data.get('vote')  # 'human' or 'ai'
-
-    if responder in leaderboard:
-        leaderboard[responder]['total_votes'] += 1
-        if vote == 'human':
-            leaderboard[responder]['human_votes'] += 1
-
-    return jsonify({'status': 'success'})
-
-@app.route('/leaderboard', methods=['GET'])
-def get_leaderboard():
-    human_likeness = {key: (value['human_votes'] / value['total_votes']) * 100 if value['total_votes'] > 0 else 0 for key, value in leaderboard.items()}
-    return jsonify(human_likeness)
+    llm = data.get('llm')
+    vote_data = json.dumps(data)
+    # Store vote_data as needed
+    return "Vote received", 200
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(debug=True)
