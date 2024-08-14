@@ -1,15 +1,15 @@
 {
   "files": {
     "main.css": "/Turing-Arena/static/css/main.e334535f.css",
-    "main.js": "/Turing-Arena/static/js/main.fe0ddeb5.js",
+    "main.js": "/Turing-Arena/static/js/main.6db91d84.js",
     "static/js/453.9a673395.chunk.js": "/Turing-Arena/static/js/453.9a673395.chunk.js",
     "index.html": "/Turing-Arena/index.html",
     "main.e334535f.css.map": "/Turing-Arena/static/css/main.e334535f.css.map",
-    "main.fe0ddeb5.js.map": "/Turing-Arena/static/js/main.fe0ddeb5.js.map",
+    "main.6db91d84.js.map": "/Turing-Arena/static/js/main.6db91d84.js.map",
     "453.9a673395.chunk.js.map": "/Turing-Arena/static/js/453.9a673395.chunk.js.map"
   },
   "entrypoints": [
     "static/css/main.e334535f.css",
-    "static/js/main.fe0ddeb5.js"
+    "static/js/main.6db91d84.js"
   ]
 }
